@@ -5,14 +5,14 @@ OBJCOPY=avr-objcopy
 #MMCU=atmega88
 MMCU=atmega168
 PROGRAMMER=avrdude
-F_CPU=1000000
+F_CPU=8000000
 
 CFLAGS=-mmcu=$(MMCU) -Wall -Os
 
-$(PROJECT).hex: $(PROJECT).out
+$(PROJECT).hex: $(PROJECT).out 
 	$(OBJCOPY) -j .text -O ihex $(PROJECT).out $(PROJECT).hex
 
-$(PROJECT).out: $(SOURCES)
+$(PROJECT).out: $(SOURCES) Makefile
 	$(CC) $(CFLAGS) -I./ -o $(PROJECT).out $(SOURCES) -DF_CPU=$(F_CPU)UL
 
 program: $(PROJECT).hex
