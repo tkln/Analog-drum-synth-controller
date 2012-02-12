@@ -68,6 +68,9 @@
 #define SCK PB5
 #define DAC_VAL OCR0A
 
+#define MUX_PORT PORTC 
+/* mux enable line is PC4 */
+
 #define BAUD 31250
 #define BAUD_PRESCALE (((F_CPU / (31250 * 16UL))) - 1)
 
@@ -82,6 +85,11 @@ static inline void usart_midi_init(uint16_t ubrr);
 /* Channels are counted from 0 not 1 */
 static inline void midi_set_listen_channel(uint8_t* data, uint8_t chnl);
 static inline void midi_set_listen_event(uint8_t* data, uint8_t event);
+
+//static inline void mux_toggle_enable();
+
+static inline void mux_init_io(void);
+static inline void mux_sample(uint8_t adr);
 
 typedef enum midi_event_stage_t{
 	event_match,
@@ -99,27 +107,40 @@ typedef struct midi_event_data_t{
 volatile uint8_t midi_listen_event; /* Status event to for trigger. Contains note on and channel. */
 volatile uint8_t midi_trigger_event;
 volatile uint32_t midi_frame_data;
-volatile uint8_t note_offset=50;
+volatile uint8_t note_offset;
 volatile midi_event_stage_t midi_event_stage;
 volatile midi_event_data_t midi_event_data;
 
 void main(void){
 	spi_master_init();
 	pwm_dac_init();
+	mux_init_io();
 	usart_midi_init(BAUD_PRESCALE);
 	
-	//midi_listen_event = 0b10010000; /*note on on channel 1 */
 	midi_event_stage = event_match;
 	midi_set_listen_event(&midi_listen_event, 0b1001);
 	midi_set_listen_channel(&midi_listen_event, 8);
-
+	note_offset = 24;
 	sei();
 
 	while(2){	
-		_delay_ms(10);
+		_delay_ms(20);
 		spi_transmit_word(0x0); /* To clean it. This is just for debugging! Wont be in final releas. */
 	}
 }
+
+static inline void mux_init_io(void){
+	DDRC = 0xff; /* whole port as output */
+	MUX_PORT = 0|(1<<4); /* adress lines to 0 enable (active low) to high */
+}
+
+static inline void mux_sample(uint8_t adr){
+	MUX_PORT = adr&0b1111;
+	MUX_PORT &= ~(1<<4);
+	_delay_ms(10);
+	//MUX_PORT |= (1<<4);
+}
+
 static inline void midi_set_listen_event(uint8_t* data, uint8_t event){
 	*data = (*data & 0b00001111) + (event << 4);
 }
@@ -148,18 +169,19 @@ ISR(USART_RX_vect){
 	switch(midi_event_stage){ /* Or how about using that struct as a list :p */
 		case event_match: 
 			if(data == midi_listen_event){
-				spi_transmit_word(0xffff);
 				midi_event_data.event_type = data;
 				midi_event_stage++;
 			}
 			break;
 		case note:
-			midi_event_data.note = data;
+			midi_event_data.note =  (uint16_t)(data - note_offset) ;
+			spi_transmit_word(1<< midi_event_data.note);
 			midi_event_stage++;
 			break;
 		case velocity:
 			midi_event_data.velocity = data;
-			DAC_VAL = (data<<1);			
+			DAC_VAL = (data<<1); /* velocity is only 7 bits because midi standards */			
+			mux_sample(midi_event_data.note);
 			midi_event_stage = event_match;
 		default:
 			break;

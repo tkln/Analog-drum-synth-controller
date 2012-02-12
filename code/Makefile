@@ -7,7 +7,7 @@ MMCU=atmega168
 PROGRAMMER=avrdude
 F_CPU=20000000
 
-CFLAGS=-mmcu=$(MMCU) -Wall -Os
+CFLAGS=-mmcu=$(MMCU) -Wall -O3
 
 $(PROJECT).hex: $(PROJECT).out 
 	$(OBJCOPY) -j .text -O ihex $(PROJECT).out $(PROJECT).hex
