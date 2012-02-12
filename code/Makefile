@@ -5,7 +5,7 @@ OBJCOPY=avr-objcopy
 #MMCU=atmega88
 MMCU=atmega168
 PROGRAMMER=avrdude
-F_CPU=8000000
+F_CPU=20000000
 
 CFLAGS=-mmcu=$(MMCU) -Wall -Os
 
