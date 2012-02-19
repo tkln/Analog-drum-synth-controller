@@ -57,7 +57,7 @@
 
 #include <avr/io.h>
 #include <stdint.h>
-#include <avr/delay.h>
+#include <util/delay.h>
 #include <avr/interrupt.h>
 
 #define spi_send(data) SPDR = data; while(!(SPSR & (1<<SPIF)));
@@ -73,6 +73,7 @@
 
 #define BAUD 31250
 #define BAUD_PRESCALE (((F_CPU / (31250 * 16UL))) - 1)
+#define MAX_VOICES 16
 
 static inline void spi_master_init(void);
 static inline void spi_transmit_byte(uint8_t byte);
@@ -89,7 +90,7 @@ static inline void midi_set_listen_event(uint8_t* data, uint8_t event);
 //static inline void mux_toggle_enable();
 
 static inline void mux_init_io(void);
-static inline void mux_sample(uint8_t adr);
+static inline void mux_dac_set(uint8_t adr, char val);
 
 typedef enum midi_event_stage_t{
 	event_match,
@@ -110,23 +111,54 @@ volatile uint32_t midi_frame_data;
 volatile uint8_t note_offset;
 volatile midi_event_stage_t midi_event_stage;
 volatile midi_event_data_t midi_event_data;
+volatile uint8_t note_vel_list[MAX_VOICES];
 
 void main(void){
+	volatile uint8_t i;
 	spi_master_init();
 	pwm_dac_init();
 	mux_init_io();
 	usart_midi_init(BAUD_PRESCALE);
 	
 	midi_event_stage = event_match;
-	midi_set_listen_event(&midi_listen_event, 0b1001);
-	midi_set_listen_channel(&midi_listen_event, 8);
+	midi_set_listen_event((uint8_t*)&midi_listen_event, 0b1001);
+	midi_set_listen_channel((uint8_t*)&midi_listen_event, 8);
 	note_offset = 24;
 	sei();
-
-	while(2){	
-		_delay_ms(20);
+	DAC_VAL = 0;
+	
+	while(1){
+		for(i = 0; i < MAX_VOICES; i++){	
+			mux_dac_set(i, note_vel_list[i]);
+			_delay_ms(5);
+		}
 		spi_transmit_word(0x0); /* To clean it. This is just for debugging! Wont be in final releas. */
 	}
+}
+
+ISR(USART_RX_vect){
+	uint8_t data = UDR0;
+	switch(midi_event_stage){ /* Or how about using that struct as a list :p */
+		case event_match: 
+			if(data == midi_listen_event){
+				midi_event_data.event_type = data;
+				midi_event_stage++;
+			}
+			break;
+		case note:
+			midi_event_data.note =  (uint16_t)(data - note_offset) ;
+			spi_transmit_word(1<< midi_event_data.note);
+			midi_event_stage++;
+			break;
+		case velocity:
+			midi_event_data.velocity = data;
+			midi_event_stage = event_match;
+			note_vel_list[midi_event_data.note] = data;
+			break;
+		default:
+			break;
+	}
+
 }
 
 static inline void mux_init_io(void){
@@ -134,10 +166,11 @@ static inline void mux_init_io(void){
 	MUX_PORT = 0|(1<<4); /* adress lines to 0 enable (active low) to high */
 }
 
-static inline void mux_sample(uint8_t adr){
+static inline void mux_dac_set(uint8_t adr, char val){
+	DAC_VAL = val;
 	MUX_PORT = adr&0b1111;
 	MUX_PORT &= ~(1<<4);
-	_delay_ms(10);
+//	_delay_ms(10);
 	//MUX_PORT |= (1<<4);
 }
 
@@ -162,31 +195,6 @@ static inline void usart_transmit(uint8_t data){
 	while(!(UCSR0A & (1<<UDRE0)))
 		;
 	UDR0 = data;
-}
-
-ISR(USART_RX_vect){
-	uint8_t data = UDR0;
-	switch(midi_event_stage){ /* Or how about using that struct as a list :p */
-		case event_match: 
-			if(data == midi_listen_event){
-				midi_event_data.event_type = data;
-				midi_event_stage++;
-			}
-			break;
-		case note:
-			midi_event_data.note =  (uint16_t)(data - note_offset) ;
-			spi_transmit_word(1<< midi_event_data.note);
-			midi_event_stage++;
-			break;
-		case velocity:
-			midi_event_data.velocity = data;
-			DAC_VAL = (data<<1); /* velocity is only 7 bits because midi standards */			
-			mux_sample(midi_event_data.note);
-			midi_event_stage = event_match;
-		default:
-			break;
-	}
-
 }
 
 static inline void pwm_dac_init(void){
