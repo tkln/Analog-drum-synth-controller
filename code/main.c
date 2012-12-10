@@ -16,15 +16,16 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-	Analong drum module midi interface firmware
-  Made for atmega168 similar ones like atmega88, 8, 328 etc. would probably work also.
+	Analong drum module MIDI interface firmware
+    Made for atmega168 similar ones like atmega88, 8, 328 etc. would probably
+    work also.
  	System diagram: 
 
 	           +-----------------+ 
 	+------+   |                 |   +---------+
 	|      |   |                 |	 |         |--> lines out 
 	| MIDI |-->| usart       spi |-->|  74595  |
-	| opto |   |                 |   |shift reg|--\ serial trough for daisy chaining
+	| opto |   |                 |   |shift reg|--\ serial daisy chaining
 	+------+   |                 |   +---------+  |
 	           |                 | /--------------/
 	           |                 | | +---------+
@@ -32,27 +33,33 @@
 	           |    atmega168    | \>|  74595  |
 	+--------+ |                 |   |         |
 	|  DIP-  | |                 |   +---------+ amplifying from 0-5V to 0-15V
-	|switches|>|                 |   +------------+   +---------+   +--------------+
-	|chn sel | |       timer pwm |-->|rc lp filter|-->|  tl072  |-->|              |
-	+--------+ |                 |   +------------+   |  opamp  |   |      4067    |
-	           |                 |                    +---------+   | analog demux |
-	           |                 |                                  |              |
-  	         |              io |--------------------------------->| pin adr      |--> lines out
-	 					 +-----------------+                                  +--------------+
+	|switches|>|                 |   +------------+   +---------+
+	|chn sel | |       timer pwm |-->|rc lp filter|-->|  tl072  |---\
+	+--------+ |                 |   +------------+   |  opamp  |   |
+	           |                 |                    +---------+   |
+	           |                 |            /---------------------/
+  	           |              io |------\     | +--------------+    
+               +-----------------+      |     \>|              |   
+                                        |       |     4067     |
+                                        |       | analog demux |-->lines out
+                                        |       |              |
+                                        \------>| adr bus      |
+                                                +--------------+
 
-	Design operational description
-	Midi messages are read in the interrupt where all but note on 
-	events on correct channel (channel is set with DIP-switches on 
-	the back of the device.) are ignored. When a valid midi event
-	arrives:
- 	1 	velocity of the note on is set to dac
-	2. 	analog demux updates that voltage to appropriate pin
-	   	pin is determined by note to which the drum voice is set
-  3. 	an spi package is crafted and sent to shift registers to
+
+
+	Design operational description  
+	Midi messages are read in the interrupt where all but note on events on 
+    correct channel (channel is set with DIP-switches on the back of the 
+    device.) are ignored. When a valid midi even arrives:
+ 	1. velocity of the note on is set to dac
+	2. analog demux updates that voltage to appropriate pin
+	   pin is determined by note to which the drum voice is set
+    3. an spi package is crafted and sent to shift registers to
 		  trigger the drum voice.
- 	Outputs of shift registers aro connected to trigger pins of the drum modules.
- 	Analog demux lines are connected to accent pins. 
-*/
+ 	Outputs of shift registers aro connected to trigger pins of the drum 
+    modules. Analog demux lines are connected to accent pins. 
+ */
 
 
 #include <avr/io.h>
@@ -104,8 +111,10 @@ typedef struct midi_event_data_t{
 					velocity;
 } midi_event_data_t;
 
-/*Midi channels range from 1 to 16 but with 4 bits you can numbers expres from 0 to 15.*/
-volatile uint8_t midi_listen_event; /* Status event to for trigger. Contains note on and channel. */
+/* Midi channels range from 1 to 16 but the actual data reads form 0 to 15. */
+
+/* Status event to for trigger. Contains note on and channel. */
+volatile uint8_t midi_listen_event;
 volatile uint8_t midi_trigger_event;
 volatile uint32_t midi_frame_data;
 volatile uint8_t note_offset;
@@ -132,7 +141,8 @@ void main(void){
 			mux_dac_set(i, note_vel_list[i]);
 			_delay_ms(5);
 		}
-		spi_transmit_word(0x0); /* To clean it. This is just for debugging! Wont be in final releas. */
+        /* To clean it. This is just for debugging! Wont be in final releas. */
+		spi_transmit_word(0x0); 
 	}
 }
 
@@ -158,7 +168,6 @@ ISR(USART_RX_vect){
 		default:
 			break;
 	}
-
 }
 
 static inline void mux_init_io(void){
@@ -186,8 +195,8 @@ static inline void usart_midi_init(uint16_t ubrr){
 	UBRR0H = (uint8_t) (ubrr>>8);
 	UBRR0L = (uint8_t) ubrr;
 	
-	UCSR0B = (1<<RXEN0)|(1<<TXEN0)|(1<<RXCIE0);/*transmit for debugging*/
-	UCSR0C = (1<<UCSZ01)|(1<<UCSZ00);/*1 stop bit 8 data bits*/	
+	UCSR0B = (1<<RXEN0)|(1<<TXEN0)|(1<<RXCIE0);/* transmit for debugging */
+	UCSR0C = (1<<UCSZ01)|(1<<UCSZ00);/* 1 stop bit 8 data bits */	
 
 }
 
@@ -199,20 +208,21 @@ static inline void usart_transmit(uint8_t data){
 
 static inline void pwm_dac_init(void){
 	DDRD |= (1<<OC0A);
-	TCCR0A = (1<<COM0A1)|(1<<WGM01)|(1<<WGM00); /* clear on compare match, fast pwm*/
-	TCCR0B = (1<<CS00); /*no clock prescaling f=fcpu*/
-	/*OCR0A = 0xfa; */
+    /* clear on compare match, fast pwm */
+	TCCR0A = (1<<COM0A1)|(1<<WGM01)|(1<<WGM00); 
+	TCCR0B = (1<<CS00); /* no clock prescaling f=fcpu */
+	/* OCR0A = 0xfa; */
 }
 
 static inline void spi_master_init(void){
-	/*SS, MOSI and SCK pins set as output*/
+	/* SS, MOSI and SCK pins set as output */
 	DDRB |= (1<<SS)|(1<<MOSI)|(1<<SCK);
-	/*spi enabled, master mode, no clock bits set so it will be fosc/4*/
+	/* SPI enabled, master mode, no clock bits set so it will be fosc/4 */
 	SPCR = (1<<SPE)|(1<<MSTR);
 }
 
 static inline void spi_trigger_latch(void){
-	/*triggering output latch on 74595*/
+	/* triggering output latch on 74595 */
 	PORTB |= (1<<SS);
 	PORTB &= ~(1<<SS);
 }
